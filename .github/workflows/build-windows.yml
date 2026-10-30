@@ -1,0 +1,267 @@
+name: Build Windows binaries
+
+# Builds SkyFire 5.4.8 (worldserver, authserver, tools) for Windows x64 against
+# the MySQL 8.0.44 client library, with the playerbots module compiled in.
+#
+# Run it from the Actions tab (Run workflow), or push a tag like v1.0.0 to also
+# publish the zip as a GitHub Release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      core_repo:
+        description: SkyFire core repository (owner/name)
+        default: Brytenwally/SkyFire_548
+      core_ref:
+        description: Core branch, tag or commit
+        default: main
+      with_playerbots:
+        description: Compile the playerbots module in
+        type: boolean
+        default: true
+      playerbots_repo:
+        description: Playerbots module repository (owner/name)
+        default: Brytenwally/SkyFire-playerbots
+      playerbots_ref:
+        description: Playerbots branch, tag or commit
+        default: main
+      with_tools:
+        description: Build the map/vmap/mmap extractors
+        type: boolean
+        default: true
+      mysql_version:
+        description: MySQL client version to link against
+        default: '8.0.44'
+  push:
+    tags: [ 'v*' ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # publishing a Release on tag pushes
+
+env:
+  # Inputs are empty on tag pushes, so every value falls back to the default.
+  CORE_REPO: ${{ inputs.core_repo || 'Brytenwally/SkyFire_548' }}
+  CORE_REF: ${{ inputs.core_ref || 'main' }}
+  WITH_PLAYERBOTS: ${{ github.event_name != 'workflow_dispatch' || inputs.with_playerbots }}
+  PLAYERBOTS_REPO: ${{ inputs.playerbots_repo || 'Brytenwally/SkyFire-playerbots' }}
+  PLAYERBOTS_REF: ${{ inputs.playerbots_ref || 'main' }}
+  WITH_TOOLS: ${{ github.event_name != 'workflow_dispatch' || inputs.with_tools }}
+  MYSQL_VERSION: ${{ inputs.mysql_version || '8.0.44' }}
+
+  BUILD_TYPE: Release
+  # Same Boost / OpenSSL the core's own Windows CI uses.
+  BOOST_VERSION: 1.91.0
+  BOOST_ROOT: C:\local\boost_1_91_0
+  OPENSSL_VERSION: 4.0.3
+  OPENSSL_ROOT_DIR: C:\Program Files\OpenSSL
+  OPENSSL_MODULES: C:\Program Files\OpenSSL\bin
+  MYSQL_DIR: C:\local\mysql
+  CORE_DIR: ${{ github.workspace }}\core
+  BUILD_DIR: ${{ github.workspace }}\build
+  PACKAGE_DIR: ${{ github.workspace }}\package
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Check out core
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.CORE_REPO }}
+        ref: ${{ env.CORE_REF }}
+        path: core
+
+    - name: Check out playerbots module
+      if: env.WITH_PLAYERBOTS == 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.PLAYERBOTS_REPO }}
+        ref: ${{ env.PLAYERBOTS_REF }}
+        path: core/modules/mod-playerbots
+
+    - name: Install CMake and OpenSSL
+      shell: pwsh
+      run: |
+        function Install-ChocoPackage([string] $Name, [string[]] $PackageArgs = @()) {
+          for ($attempt = 1; $attempt -le 3; ++$attempt) {
+            choco install -y $Name @PackageArgs --no-progress
+            if ($LASTEXITCODE -eq 0) { return }
+            if ($attempt -eq 3) { exit $LASTEXITCODE }
+            Start-Sleep -Seconds (30 * $attempt)
+          }
+        }
+        Install-ChocoPackage cmake @('--pre')
+        Install-ChocoPackage openssl @("--version=$env:OPENSSL_VERSION")
+
+    - name: Cache Boost
+      id: boost-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.BOOST_ROOT }}
+        key: boost-${{ env.BOOST_VERSION }}-windows
+
+    - name: Install Boost
+      if: steps.boost-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $name = "boost_" + $env:BOOST_VERSION.Replace('.', '_')
+        $archive = Join-Path $env:RUNNER_TEMP "$name.7z"
+        Invoke-WebRequest -Uri "https://archives.boost.io/release/$env:BOOST_VERSION/source/$name.7z" -OutFile $archive
+        7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
+        Push-Location (Join-Path $env:RUNNER_TEMP $name)
+        try {
+          .\bootstrap.bat
+          .\b2.exe install --prefix="$env:BOOST_ROOT" --with-headers -j2
+        } finally {
+          Pop-Location
+        }
+
+    # Only the client headers, import library and DLLs are kept, so the
+    # cache stays small (the full server zip is ~250 MB).
+    - name: Cache MySQL ${{ env.MYSQL_VERSION }} client
+      id: mysql-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.MYSQL_DIR }}
+        key: mysql-${{ env.MYSQL_VERSION }}-winx64-client
+
+    - name: Download MySQL ${{ env.MYSQL_VERSION }}
+      if: steps.mysql-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        $series = ($env:MYSQL_VERSION -split '\.')[0..1] -join '.'
+        $zip = "mysql-$env:MYSQL_VERSION-winx64.zip"
+        # Current releases live under Downloads, older ones move to archives.
+        $urls = @(
+          "https://cdn.mysql.com/Downloads/MySQL-$series/$zip",
+          "https://cdn.mysql.com/archives/mysql-$series/$zip",
+          "https://downloads.mysql.com/archives/get/p/23/file/$zip"
+        )
+        $archive = Join-Path $env:RUNNER_TEMP $zip
+        $ok = $false
+        foreach ($url in $urls) {
+          try {
+            Write-Host "Trying $url"
+            Invoke-WebRequest -Uri $url -OutFile $archive -UserAgent 'Mozilla/5.0'
+            $ok = $true
+            break
+          } catch {
+            Write-Host "  failed: $($_.Exception.Message)"
+          }
+        }
+        if (-not $ok) { throw "Could not download $zip" }
+
+        7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
+        $src = Join-Path $env:RUNNER_TEMP "mysql-$env:MYSQL_VERSION-winx64"
+        New-Item -ItemType Directory -Force -Path "$env:MYSQL_DIR\lib", "$env:MYSQL_DIR\bin" | Out-Null
+        Copy-Item -Recurse "$src\include" "$env:MYSQL_DIR\include"
+        Copy-Item "$src\lib\libmysql.lib", "$src\lib\libmysql.dll" "$env:MYSQL_DIR\lib"
+        # libmysql.dll's own OpenSSL 3 runtime (the core links OpenSSL 4).
+        Get-ChildItem "$src\bin", "$src\lib" -Filter 'lib*-3-x64.dll' -ErrorAction SilentlyContinue |
+          Copy-Item -Destination "$env:MYSQL_DIR\bin" -Force
+
+    - name: Verify MySQL client version
+      shell: pwsh
+      run: |
+        $header = Get-Content "$env:MYSQL_DIR\include\mysql_version.h" -Raw
+        if ($header -notmatch '#define\s+MYSQL_SERVER_VERSION\s+"([^"]+)"') { throw 'mysql_version.h has no MYSQL_SERVER_VERSION' }
+        $found = $Matches[1]
+        if (-not $found.StartsWith($env:MYSQL_VERSION)) { throw "Expected MySQL $env:MYSQL_VERSION headers, found $found" }
+        Write-Host "MySQL client headers: $found"
+
+    - name: Configure
+      shell: pwsh
+      run: |
+        $tools = if ($env:WITH_TOOLS -eq 'true') { 'ON' } else { 'OFF' }
+        $modules = if ($env:WITH_PLAYERBOTS -eq 'true') { 'ON' } else { 'OFF' }
+        $env:MYSQL_ROOT = $env:MYSQL_DIR
+        $mysql = $env:MYSQL_DIR.Replace('\', '/')
+        # MySQL paths are passed explicitly so the runner's preinstalled MySQL
+        # server is never picked up instead of the requested client version.
+        cmake -S "$env:CORE_DIR" -B "$env:BUILD_DIR" -A x64 `
+          -DTOOLS="$tools" `
+          -DMODULES="$modules" `
+          -DUSE_COREPCH=ON `
+          -DUSE_SCRIPTPCH=ON `
+          -DSKYFIRE_BUILD_TESTS=OFF `
+          -DBOOST_ROOT="$env:BOOST_ROOT" `
+          -DOPENSSL_ROOT_DIR="$env:OPENSSL_ROOT_DIR" `
+          -DMYSQL_INCLUDE_DIR="$mysql/include" `
+          -DMYSQL_LIBRARY="$mysql/lib/libmysql.lib" `
+          -DMYSQL_DLL="$mysql/lib/libmysql.dll" `
+          -DCMAKE_INSTALL_PREFIX="$env:PACKAGE_DIR"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        $cache = Get-Content "$env:BUILD_DIR\CMakeCache.txt"
+        $cache | Select-String '^MYSQL_(INCLUDE_DIR|LIBRARY|DLL)[:=]'
+        if (-not ($cache | Select-String -Pattern ('^MYSQL_LIBRARY:[A-Z]+=' + [regex]::Escape("$mysql/lib/libmysql.lib") + '$'))) {
+          throw 'CMake did not pick the MySQL client from MYSQL_DIR'
+        }
+
+    - name: Build
+      shell: pwsh
+      run: |
+        cmake --build "$env:BUILD_DIR" --config "$env:BUILD_TYPE" --parallel 4
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Package
+      shell: pwsh
+      run: |
+        cmake --install "$env:BUILD_DIR" --config "$env:BUILD_TYPE"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+        # Anything the post-build steps staged next to the executables
+        # (runtime DLLs, module .conf.dist files, tools) that install skipped.
+        $out = "$env:BUILD_DIR\bin\$env:BUILD_TYPE"
+        Get-ChildItem -Path "$out\*" -File -Include *.exe, *.dll, *.conf.dist |
+          Where-Object { -not (Test-Path (Join-Path $env:PACKAGE_DIR $_.Name)) } |
+          Copy-Item -Destination $env:PACKAGE_DIR
+
+        Copy-Item "$env:MYSQL_DIR\lib\libmysql.dll" $env:PACKAGE_DIR -Force
+        Get-ChildItem "$env:MYSQL_DIR\bin" -Filter *.dll |
+          Where-Object { -not (Test-Path (Join-Path $env:PACKAGE_DIR $_.Name)) } |
+          Copy-Item -Destination $env:PACKAGE_DIR
+
+        $coreSha = git -C "$env:CORE_DIR" rev-parse --short HEAD
+        $botsSha = if ($env:WITH_PLAYERBOTS -eq 'true') { git -C "$env:CORE_DIR\modules\mod-playerbots" rev-parse --short HEAD } else { 'not included' }
+        @(
+          "SkyFire 5.4.8 Windows x64 $env:BUILD_TYPE build"
+          "Built:      $(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          "Core:       $env:CORE_REPO@$env:CORE_REF ($coreSha)"
+          "Playerbots: $env:PLAYERBOTS_REPO@$env:PLAYERBOTS_REF ($botsSha)"
+          "MySQL:      $env:MYSQL_VERSION client (libmysql.dll)"
+          "Boost:      $env:BOOST_VERSION"
+          "OpenSSL:    $env:OPENSSL_VERSION"
+          ""
+          "Needs the Microsoft Visual C++ 2015-2022 x64 redistributable:"
+          "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+        ) | Set-Content "$env:PACKAGE_DIR\BUILD-INFO.txt"
+
+        $name = "SkyFire-548-win64-mysql$env:MYSQL_VERSION-$coreSha"
+        if ($env:WITH_PLAYERBOTS -eq 'true') { $name += "-playerbots-$botsSha" }
+        "PACKAGE_NAME=$name" >> $env:GITHUB_ENV
+        Get-ChildItem $env:PACKAGE_DIR -Recurse | Select-Object -ExpandProperty FullName
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.PACKAGE_NAME }}
+        path: ${{ env.PACKAGE_DIR }}
+        if-no-files-found: error
+
+    - name: Zip for release
+      if: startsWith(github.ref, 'refs/tags/')
+      shell: pwsh
+      run: Compress-Archive -Path "$env:PACKAGE_DIR\*" -DestinationPath "$env:GITHUB_WORKSPACE\$env:PACKAGE_NAME.zip"
+
+    - name: Publish release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ env.PACKAGE_NAME }}.zip
+        body_path: ${{ env.PACKAGE_DIR }}/BUILD-INFO.txt

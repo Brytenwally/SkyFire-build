@@ -41,9 +41,10 @@ SkyFire-playerbots' `CLAUDE.md`. In short: `Brytenwally/mod-playerbots` is a
   dump from github.com/ProjectSkyfire/SkyFire_548/releases (not in git).
   `.account create` takes `<email> <username> <password>`.
 - The owner's local setup: a portable MySQL 8.0.44 in "LoA Pandaria Repack\mysql"
-  (init_mysql.bat runs `--initialize-insecure`: only root, no password, bound
-  to 127.0.0.1). Their confs log in as root: `"127.0.0.1;3306;root;;auth"`
-  (an empty password field is parsed fine) with AutoSetup/AutoCreate = 1 and
+  bound to 127.0.0.1. Its root account has a password (set by the repack, not
+  the empty one init_mysql.bat's `--initialize-insecure` gives); never write
+  that password into this repo. Their confs log in as root
+  (`"127.0.0.1;3306;root;<password>;auth"`) with AutoSetup/AutoCreate = 1 and
   `WorldDatabase.BaseSqlFile` = the release dump
   `sql/SFDB_full_548_26.002_2026_008_18_Release.sql`.
 - That release dump is world-only, has stored procedures with

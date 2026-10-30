@@ -223,6 +223,14 @@ jobs:
           Copy-Item -Destination $env:PACKAGE_DIR
 
         Copy-Item "$env:MYSQL_DIR\lib\libmysql.dll" $env:PACKAGE_DIR -Force
+
+        # SQL the servers read with <Domain>Database.AutoSetup / SqlPath = "sql":
+        # base schemas, create scripts and every update. The world base dump is
+        # not in git; it comes from the SkyFire releases page.
+        New-Item -ItemType Directory -Force -Path "$env:PACKAGE_DIR\sql" | Out-Null
+        foreach ($dir in 'base', 'create', 'updates') {
+          Copy-Item -Recurse "$env:CORE_DIR\sql\$dir" "$env:PACKAGE_DIR\sql\$dir"
+        }
         Get-ChildItem "$env:MYSQL_DIR\bin" -Filter *.dll |
           Where-Object { -not (Test-Path (Join-Path $env:PACKAGE_DIR $_.Name)) } |
           Copy-Item -Destination $env:PACKAGE_DIR

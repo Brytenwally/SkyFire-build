@@ -33,6 +33,16 @@ SkyFire-playerbots' `CLAUDE.md`. In short: `Brytenwally/mod-playerbots` is a
   forward slashes and checked in `CMakeCache.txt`.
 - No `-G`: CMake uses whatever Visual Studio `windows-latest` has, `-A x64`.
 - Package = `cmake --install` output + DLLs/`.conf.dist` from `build/bin/Release`
-  + MySQL DLLs + `BUILD-INFO.txt`.
+  + MySQL DLLs + core `sql/{base,create,updates}` as `sql\` + `BUILD-INFO.txt`.
+- The servers log in as `skyfire`/`skyfire` to `auth`/`world`/`characters`
+  (conf defaults). Database setup is done by the core itself:
+  `<Login|World|Character>Database.AutoSetup = 1`, `SqlPath = "sql"` (relative
+  to the working directory). World also needs `WorldDatabase.BaseSqlFile`, a
+  dump from github.com/ProjectSkyfire/SkyFire_548/releases (not in git).
+  `.account create` takes `<email> <username> <password>`.
+- The owner's local setup: a portable MySQL 8.0.44 in "LoA Pandaria Repack\mysql"
+  (init_mysql.bat runs `--initialize-insecure`: root with no password). The
+  skyfire user and the three empty databases are created by a
+  setup_skyfire_db.bat/.sql handed to the owner (not in this repo).
 - The cloud container cannot reach mysql.com and has no Windows: verify changes
   by running the workflow (GitHub MCP `actions_run_trigger`) and reading logs.

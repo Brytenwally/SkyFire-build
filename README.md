@@ -47,6 +47,12 @@ gh run download -R Brytenwally/SkyFire-build   # fetch the artifact
 - `worldserver.conf.dist`, `authserver.conf.dist`, `playerbots.conf.dist`.
 - `libmysql.dll` (MySQL 8.0.44), the OpenSSL 4 DLLs the core uses and the
   OpenSSL 3 DLLs `libmysql.dll` needs.
+- `sql\`: the core's base schemas, create scripts and updates. With
+  `AutoSetup = 1` and `SqlPath = "sql"` in `authserver.conf` /
+  `worldserver.conf` the servers create and update the auth and characters
+  databases themselves. The world database dump is not in git: get it from the
+  [SkyFire releases](https://github.com/ProjectSkyfire/SkyFire_548/releases)
+  and point `WorldDatabase.BaseSqlFile` at it (e.g. `sql/world_database.sql`).
 - `BUILD-INFO.txt`: the exact core/module commits and dependency versions.
 
 The binaries need the [Visual C++ 2015-2022 x64 redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).

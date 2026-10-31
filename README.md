@@ -2,13 +2,15 @@
 
 GitHub Actions build of **SkyFire 5.4.8** (Mists of Pandaria) Windows x64
 binaries, linked against the **MySQL 8.0.44** client, with the
-[SkyFire-playerbots](https://github.com/Brytenwally/SkyFire-playerbots) module
+[SkyFire-playerbots](https://github.com/Brytenwally/SkyFire-playerbots) and
+[SkyFire-DestinyWeaver](https://github.com/Brytenwally/SkyFire-DestinyWeaver) modules
 compiled in.
 
 | Source | Default |
 | --- | --- |
 | Core | [Brytenwally/SkyFire_548](https://github.com/Brytenwally/SkyFire_548) `main` |
 | Module | [Brytenwally/SkyFire-playerbots](https://github.com/Brytenwally/SkyFire-playerbots) `main` (in `modules/mod-playerbots`) |
+| Module | [Brytenwally/SkyFire-DestinyWeaver](https://github.com/Brytenwally/SkyFire-DestinyWeaver) `main` (in `modules/mod-destiny-weaver`; off until `DestinyWeaver.Enable = 1` in `destiny_weaver.conf`) |
 | MySQL client | 8.0.44 (`libmysql.dll` + its OpenSSL 3 DLLs are shipped) |
 | Boost / OpenSSL | 1.91.0 / 4.0.3, same as the core's own Windows CI |
 | Compiler | Visual Studio on `windows-latest`, x64, Release |

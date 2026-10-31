@@ -1,7 +1,8 @@
 name: Build Windows binaries
 
 # Builds SkyFire 5.4.8 (worldserver, authserver, tools) for Windows x64 against
-# the MySQL 8.0.44 client library, with the playerbots module compiled in.
+# the MySQL 8.0.44 client library, with the playerbots and Destiny Weaver
+# modules compiled in.
 #
 # Run it from the Actions tab (Run workflow), or push a tag like v1.0.0 to also
 # publish the zip as a GitHub Release.
@@ -24,6 +25,16 @@ on:
         default: Brytenwally/SkyFire-playerbots
       playerbots_ref:
         description: Playerbots branch, tag or commit
+        default: main
+      with_destiny_weaver:
+        description: Compile the Destiny Weaver module in (disabled in its config by default)
+        type: boolean
+        default: true
+      destiny_weaver_repo:
+        description: Destiny Weaver module repository (owner/name)
+        default: Brytenwally/SkyFire-DestinyWeaver
+      destiny_weaver_ref:
+        description: Destiny Weaver branch, tag or commit
         default: main
       with_tools:
         description: Build the map/vmap/mmap extractors
@@ -49,6 +60,9 @@ env:
   WITH_PLAYERBOTS: ${{ github.event_name != 'workflow_dispatch' || inputs.with_playerbots }}
   PLAYERBOTS_REPO: ${{ inputs.playerbots_repo || 'Brytenwally/SkyFire-playerbots' }}
   PLAYERBOTS_REF: ${{ inputs.playerbots_ref || 'main' }}
+  WITH_DESTINY_WEAVER: ${{ github.event_name != 'workflow_dispatch' || inputs.with_destiny_weaver }}
+  DESTINY_WEAVER_REPO: ${{ inputs.destiny_weaver_repo || 'Brytenwally/SkyFire-DestinyWeaver' }}
+  DESTINY_WEAVER_REF: ${{ inputs.destiny_weaver_ref || 'main' }}
   WITH_TOOLS: ${{ github.event_name != 'workflow_dispatch' || inputs.with_tools }}
   MYSQL_VERSION: ${{ inputs.mysql_version || '8.0.44' }}
 
@@ -83,6 +97,14 @@ jobs:
         repository: ${{ env.PLAYERBOTS_REPO }}
         ref: ${{ env.PLAYERBOTS_REF }}
         path: core/modules/mod-playerbots
+
+    - name: Check out Destiny Weaver module
+      if: env.WITH_DESTINY_WEAVER == 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ env.DESTINY_WEAVER_REPO }}
+        ref: ${{ env.DESTINY_WEAVER_REF }}
+        path: core/modules/mod-destiny-weaver
 
     - name: Install CMake and OpenSSL
       shell: pwsh
@@ -178,7 +200,7 @@ jobs:
       shell: pwsh
       run: |
         $tools = if ($env:WITH_TOOLS -eq 'true') { 'ON' } else { 'OFF' }
-        $modules = if ($env:WITH_PLAYERBOTS -eq 'true') { 'ON' } else { 'OFF' }
+        $modules = if ($env:WITH_PLAYERBOTS -eq 'true' -or $env:WITH_DESTINY_WEAVER -eq 'true') { 'ON' } else { 'OFF' }
         $env:MYSQL_ROOT = $env:MYSQL_DIR
         $mysql = $env:MYSQL_DIR.Replace('\', '/')
         # MySQL paths are passed explicitly so the runner's preinstalled MySQL
@@ -237,11 +259,13 @@ jobs:
 
         $coreSha = git -C "$env:CORE_DIR" rev-parse --short HEAD
         $botsSha = if ($env:WITH_PLAYERBOTS -eq 'true') { git -C "$env:CORE_DIR\modules\mod-playerbots" rev-parse --short HEAD } else { 'not included' }
+        $weaverSha = if ($env:WITH_DESTINY_WEAVER -eq 'true') { git -C "$env:CORE_DIR\modules\mod-destiny-weaver" rev-parse --short HEAD } else { 'not included' }
         @(
           "SkyFire 5.4.8 Windows x64 $env:BUILD_TYPE build"
           "Built:      $(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           "Core:       $env:CORE_REPO@$env:CORE_REF ($coreSha)"
           "Playerbots: $env:PLAYERBOTS_REPO@$env:PLAYERBOTS_REF ($botsSha)"
+          "Destiny Weaver: $env:DESTINY_WEAVER_REPO@$env:DESTINY_WEAVER_REF ($weaverSha) - off until DestinyWeaver.Enable = 1 in destiny_weaver.conf"
           "MySQL:      $env:MYSQL_VERSION client (libmysql.dll)"
           "Boost:      $env:BOOST_VERSION"
           "OpenSSL:    $env:OPENSSL_VERSION"
@@ -252,6 +276,7 @@ jobs:
 
         $name = "SkyFire-548-win64-mysql$env:MYSQL_VERSION-$coreSha"
         if ($env:WITH_PLAYERBOTS -eq 'true') { $name += "-playerbots-$botsSha" }
+        if ($env:WITH_DESTINY_WEAVER -eq 'true') { $name += "-dw-$weaverSha" }
         "PACKAGE_NAME=$name" >> $env:GITHUB_ENV
         Get-ChildItem $env:PACKAGE_DIR -Recurse | Select-Object -ExpandProperty FullName
 

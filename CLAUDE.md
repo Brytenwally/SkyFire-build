@@ -7,8 +7,10 @@ date** with anything future sessions need, in the same commit as the change.
 
 A GitHub Actions workflow (`.github/workflows/build-windows.yml`) that builds
 **SkyFire 5.4.8** Windows x64 binaries from `Brytenwally/SkyFire_548` with
-`Brytenwally/SkyFire-playerbots` checked out into `modules/mod-playerbots`,
-linked against the **MySQL 8.0.44** client. Usage is in `README.md`.
+`Brytenwally/SkyFire-playerbots` checked out into `modules/mod-playerbots` and
+`Brytenwally/SkyFire-DestinyWeaver` into `modules/mod-destiny-weaver` (input
+`with_destiny_weaver`, on by default; the module itself is disabled in its
+conf), linked against the **MySQL 8.0.44** client. Usage is in `README.md`.
 
 Project-wide notes (repositories, porting rules) live in
 SkyFire-playerbots' `CLAUDE.md`. In short: `Brytenwally/mod-playerbots` is a

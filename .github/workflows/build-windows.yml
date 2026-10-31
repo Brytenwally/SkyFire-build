@@ -52,6 +52,7 @@ concurrency:
 
 permissions:
   contents: write # publishing a Release on tag pushes
+  actions: read   # finding the previous build for the changelog
 
 env:
   # Inputs are empty on tag pushes, so every value falls back to the default.
@@ -280,6 +281,113 @@ jobs:
         "PACKAGE_NAME=$name" >> $env:GITHUB_ENV
         Get-ChildItem $env:PACKAGE_DIR -Recurse | Select-Object -ExpandProperty FullName
 
+    - name: Changelog since the previous build
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # The commits this build is made of, kept in the package so the next
+        # build can compare against them.
+        $components = @(
+          @{ Name = 'Core';           Repo = $env:CORE_REPO;           Dir = $env:CORE_DIR;                                On = $true }
+          @{ Name = 'Playerbots';     Repo = $env:PLAYERBOTS_REPO;     Dir = "$env:CORE_DIR\modules\mod-playerbots";      On = $env:WITH_PLAYERBOTS -eq 'true' }
+          @{ Name = 'Destiny Weaver'; Repo = $env:DESTINY_WEAVER_REPO; Dir = "$env:CORE_DIR\modules\mod-destiny-weaver";  On = $env:WITH_DESTINY_WEAVER -eq 'true' }
+        )
+        $current = [ordered]@{}
+        foreach ($c in $components) {
+          if ($c.On) { $current[$c.Name] = [ordered]@{ repo = $c.Repo; sha = (git -C $c.Dir rev-parse HEAD).Trim() } }
+        }
+        $current | ConvertTo-Json | Set-Content "$env:PACKAGE_DIR\commits.json"
+
+        # The last successful build of this workflow (same branch or tag first,
+        # then any): its package holds commits.json, or BUILD-INFO.txt for
+        # builds made before the changelog existed.
+        function Find-PreviousBuild {
+          foreach ($filter in @(, @('--branch', $env:GITHUB_REF_NAME)) + @(, @())) {
+            $json = gh run list -R $env:GITHUB_REPOSITORY --workflow build-windows.yml --status success --limit 10 --json databaseId,number @filter
+            if ($LASTEXITCODE -ne 0 -or -not $json) { continue }
+            foreach ($run in (($json -join "`n") | ConvertFrom-Json)) {
+              if ("$($run.databaseId)" -eq $env:GITHUB_RUN_ID) { continue }
+              $dir = Join-Path $env:RUNNER_TEMP "previous-$($run.databaseId)"
+              gh run download $run.databaseId -R $env:GITHUB_REPOSITORY -p 'SkyFire-548-*' -D $dir 2>&1 | Out-Null
+              if ($LASTEXITCODE -ne 0) { continue }   # artifact expired or deleted
+              $commits = @{}
+              $file = Get-ChildItem $dir -Recurse -Filter commits.json | Select-Object -First 1
+              if ($file) {
+                (Get-Content $file.FullName -Raw | ConvertFrom-Json).PSObject.Properties |
+                  ForEach-Object { $commits[$_.Name] = @{ repo = $_.Value.repo; sha = $_.Value.sha } }
+              } else {
+                $file = Get-ChildItem $dir -Recurse -Filter BUILD-INFO.txt | Select-Object -First 1
+                if (-not $file) { continue }
+                foreach ($line in Get-Content $file.FullName) {
+                  if ($line -match '^(Core|Playerbots|Destiny Weaver):\s+(\S+)@\S+ \(([0-9a-f]{7,40})\)') {
+                    $commits[$Matches[1]] = @{ repo = $Matches[2]; sha = $Matches[3] }
+                  }
+                }
+              }
+              if ($commits.Count) { return @{ Run = $run; Commits = $commits } }
+            }
+          }
+          return $null
+        }
+
+        $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs"
+        $previous = Find-PreviousBuild
+        $lines = @()
+        if (-not $previous) {
+          $lines += '# Changes since the previous build', '', 'No previous build to compare with.'
+        } else {
+          $lines += "# Changes since build #$($previous.Run.number)", ''
+          $lines += "Previous build: $runUrl/$($previous.Run.databaseId)", ''
+          foreach ($name in $current.Keys) {
+            $cur = $current[$name]
+            $old = $previous.Commits[$name]
+            $lines += "## $name ($($cur.repo))", ''
+            if (-not $old) {
+              $lines += 'Not in the previous build.', ''
+              continue
+            }
+            if ($old.repo -ne $cur.repo) {
+              $lines += "The previous build used $($old.repo) ($($old.sha.Substring(0, 7))).", ''
+              continue
+            }
+            $json = gh api "repos/$($cur.repo)/compare/$($old.sha)...$($cur.sha)"
+            if ($LASTEXITCODE -ne 0 -or -not $json) {
+              $lines += "Could not compare $($old.sha.Substring(0, 7)) with $($cur.sha.Substring(0, 7)).", ''
+              continue
+            }
+            $cmp = ($json -join "`n") | ConvertFrom-Json
+            if ($cmp.total_commits -eq 0 -and $cmp.behind_by -eq 0) {
+              $lines += 'No changes.', ''
+              continue
+            }
+            # Newest first; the compare API lists at most 250 commits.
+            $list = @($cmp.commits)
+            [array]::Reverse($list)
+            foreach ($commit in $list) {
+              $subject = ($commit.commit.message -split "`n")[0].Trim()
+              $lines += "- [``$($commit.sha.Substring(0, 7))``]($($commit.html_url)) $subject ($($commit.commit.author.name))"
+            }
+            if ($cmp.total_commits -gt $list.Count) {
+              $lines += "- ... $($cmp.total_commits - $list.Count) more: $($cmp.html_url)"
+            }
+            if ($cmp.behind_by -gt 0) {
+              $lines += '', "$($cmp.behind_by) commit(s) of the previous build are not in this one (an older or different branch was built)."
+            }
+            $lines += ''
+          }
+          foreach ($name in $previous.Commits.Keys) {
+            if (-not $current.Contains($name)) { $lines += "## $name", '', 'In the previous build, left out of this one.', '' }
+          }
+        }
+
+        $lines | Set-Content "$env:PACKAGE_DIR\CHANGELOG.md"
+        $lines | Add-Content $env:GITHUB_STEP_SUMMARY
+        # Release notes for tag builds: build info, then the changelog.
+        @('```') + (Get-Content "$env:PACKAGE_DIR\BUILD-INFO.txt") + @('```', '') + $lines |
+          Set-Content "$env:GITHUB_WORKSPACE\RELEASE-NOTES.md"
+        $lines | Write-Host
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
@@ -297,4 +405,4 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: ${{ env.PACKAGE_NAME }}.zip
-        body_path: ${{ env.PACKAGE_DIR }}/BUILD-INFO.txt
+        body_path: RELEASE-NOTES.md

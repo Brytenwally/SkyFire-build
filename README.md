@@ -56,6 +56,9 @@ gh run download -R Brytenwally/SkyFire-build   # fetch the artifact
   [SkyFire releases](https://github.com/ProjectSkyfire/SkyFire_548/releases)
   and point `WorldDatabase.BaseSqlFile` at it (e.g. `sql/world_database.sql`).
 - `BUILD-INFO.txt`: the exact core/module commits and dependency versions.
+- `CHANGELOG.md`: every core and module commit since the previous successful
+  build (also shown on the run's summary page, and as the release notes of tag
+  builds). `commits.json` records this build's commits for the next one.
 
 The binaries need the [Visual C++ 2015-2022 x64 redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe).
 The database SQL and setup steps come from the core repository; see the

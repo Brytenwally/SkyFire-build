@@ -33,6 +33,14 @@ SkyFire-playerbots' `CLAUDE.md`. In short: `Brytenwally/mod-playerbots` is a
   are cached. The build fails if the headers are not the requested version or
   CMake picks the runner's preinstalled MySQL; MySQL paths are passed with
   forward slashes and checked in `CMakeCache.txt`.
+- Changelog: the "Changelog since the previous build" step writes `commits.json`
+  (full SHAs) and `CHANGELOG.md` into the package, the job summary and the release
+  notes (`RELEASE-NOTES.md` = BUILD-INFO + changelog). The previous build is the
+  last successful run of this workflow (same branch/tag first, then any) whose
+  package artifact can still be downloaded (`gh run download`, needs
+  `actions: read`); its commits come from `commits.json`, or are parsed from
+  `BUILD-INFO.txt` for older builds. Commits between the two come from the GitHub
+  compare API (max 250 listed), so shallow checkouts are fine.
 - No `-G`: CMake uses whatever Visual Studio `windows-latest` has, `-A x64`.
 - Package = `cmake --install` output + DLLs/`.conf.dist` from `build/bin/Release`
   + MySQL DLLs + core `sql/{base,create,updates}` as `sql\` + `BUILD-INFO.txt`.

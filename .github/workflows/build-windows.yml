@@ -24,7 +24,7 @@ on:
         default: Brytenwally/SkyFire-playerbots
       playerbots_ref:
         description: Playerbots branch, tag or commit
-        default: main
+        default: gear-in-memory
       with_tools:
         description: Build the map/vmap/mmap extractors
         type: boolean
@@ -48,7 +48,9 @@ env:
   CORE_REF: ${{ inputs.core_ref || 'main' }}
   WITH_PLAYERBOTS: ${{ github.event_name != 'workflow_dispatch' || inputs.with_playerbots }}
   PLAYERBOTS_REPO: ${{ inputs.playerbots_repo || 'Brytenwally/SkyFire-playerbots' }}
-  PLAYERBOTS_REF: ${{ inputs.playerbots_ref || 'main' }}
+  PLAYERBOTS_REF: ${{ inputs.playerbots_ref || 'gear-in-memory' }}
+  # This branch builds the test version that picks gear from memory, not SQL.
+  VARIANT: gearmem
   WITH_TOOLS: ${{ github.event_name != 'workflow_dispatch' || inputs.with_tools }}
   MYSQL_VERSION: ${{ inputs.mysql_version || '8.0.44' }}
 
@@ -242,6 +244,7 @@ jobs:
           "Built:      $(Get-Date -Format 'yyyy-MM-dd HH:mm') UTC by $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           "Core:       $env:CORE_REPO@$env:CORE_REF ($coreSha)"
           "Playerbots: $env:PLAYERBOTS_REPO@$env:PLAYERBOTS_REF ($botsSha)"
+          "Variant:    $(if ($env:VARIANT) { $env:VARIANT + ' (gear chosen from memory, not SQL)' } else { 'main' })"
           "MySQL:      $env:MYSQL_VERSION client (libmysql.dll)"
           "Boost:      $env:BOOST_VERSION"
           "OpenSSL:    $env:OPENSSL_VERSION"
@@ -252,6 +255,7 @@ jobs:
 
         $name = "SkyFire-548-win64-mysql$env:MYSQL_VERSION-$coreSha"
         if ($env:WITH_PLAYERBOTS -eq 'true') { $name += "-playerbots-$botsSha" }
+        if ($env:VARIANT) { $name += "-$env:VARIANT" }
         "PACKAGE_NAME=$name" >> $env:GITHUB_ENV
         Get-ChildItem $env:PACKAGE_DIR -Recurse | Select-Object -ExpandProperty FullName
 

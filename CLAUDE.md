@@ -21,6 +21,12 @@ SkyFire-playerbots' `CLAUDE.md`. In short: `Brytenwally/mod-playerbots` is a
 
 ## Workflow facts
 
+- **Branch `gear-in-memory`**: same workflow, but `playerbots_ref` defaults to
+  the SkyFire-playerbots `gear-in-memory` branch (gear chosen from the
+  in-memory item store, not SQL) and the zip name ends in `-gearmem`. Run it
+  with `actions_run_trigger` on ref `gear-in-memory`. Concurrency is per ref,
+  so it runs alongside `main` builds. Keep workflow fixes in sync on both.
+
 - Triggers: `workflow_dispatch` (inputs: core/module repo and ref, module
   on/off, tools on/off, MySQL version) and `v*` tags, which also publish a
   GitHub Release. Tag builds use the defaults.
